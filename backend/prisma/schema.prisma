@@ -1,0 +1,83 @@
+// Gift Economy Contribution Tracker Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Community {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members              Member[]
+  giftContributions    GiftContribution[]
+  giftBalanceSnapshots GiftBalanceSnapshot[]
+
+  @@map("communities")
+}
+
+model Member {
+  id          String   @id @default(cuid())
+  communityId String
+  name        String
+  email       String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  community            Community             @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  givenContributions   GiftContribution[]    @relation("GiverRelation")
+  receivedContributions GiftContribution[]   @relation("ReceiverRelation")
+  balanceSnapshots     GiftBalanceSnapshot[]
+
+  @@unique([communityId, email])
+  @@map("members")
+}
+
+model GiftContribution {
+  id                   String   @id @default(cuid())
+  communityId          String
+  giverMemberId        String
+  receiverMemberId     String?  // nullable for community-wide gifts
+  descriptionMarkdown  String
+  timestamp            DateTime @default(now())
+  valueEstimate        Float?   // soft indicator, not strict accounting
+  tagsJson             String   @default("[]") // JSON array of tags
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  giver     Member    @relation("GiverRelation", fields: [giverMemberId], references: [id], onDelete: Cascade)
+  receiver  Member?   @relation("ReceiverRelation", fields: [receiverMemberId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, timestamp])
+  @@index([giverMemberId])
+  @@index([receiverMemberId])
+  @@map("gift_contributions")
+}
+
+model GiftBalanceSnapshot {
+  id            String   @id @default(cuid())
+  memberId      String
+  communityId   String
+  timestamp     DateTime @default(now())
+  givenCount    Int      @default(0)
+  receivedCount Int      @default(0)
+  netBalance    Float    @default(0) // soft metric
+  metaJson      String   @default("{}") // additional metadata
+  createdAt     DateTime @default(now())
+
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, timestamp])
+  @@index([communityId, timestamp])
+  @@map("gift_balance_snapshots")
+}
