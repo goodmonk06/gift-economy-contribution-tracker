@@ -17,6 +17,53 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - gift-economy-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: gift-economy-backend
+    environment:
+      DATABASE_URL: postgresql://gifteconomy:gifteconomy_dev@postgres:5432/gift_economy?schema=public
+      PORT: 3001
+      NODE_ENV: development
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gift-economy-network
+    command: sh -c "npx prisma migrate deploy && npm run dev"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: gift-economy-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - gift-economy-network
 
 volumes:
   postgres_data:
+
+networks:
+  gift-economy-network:
+    driver: bridge

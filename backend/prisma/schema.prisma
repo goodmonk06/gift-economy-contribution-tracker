@@ -1,4 +1,4 @@
-// Gift Economy Contribution Tracker Schema
+// Gift Economy Contribution Tracker Schema - Phase 3 Expanded
 
 generator client {
   provider = "prisma-client-js"
@@ -9,57 +9,142 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum GiftStatus {
+  PENDING
+  ACKNOWLEDGED
+  COMPLETED
+  CANCELLED
+}
+
+enum GiftVisibility {
+  PUBLIC
+  COMMUNITY
+  PRIVATE
+}
+
+enum RelationshipType {
+  KNOWS
+  TRUSTS
+  MENTORS
+  COLLABORATES
+}
+
+enum ActivityType {
+  GIFT_CREATED
+  GIFT_ACKNOWLEDGED
+  MEMBER_JOINED
+  MEMBER_INVITED
+  COMMUNITY_CREATED
+  SETTINGS_UPDATED
+  SNAPSHOT_GENERATED
+}
+
+enum NotificationType {
+  GIFT_RECEIVED
+  GIFT_ACKNOWLEDGED
+  MEMBER_MENTIONED
+  COMMUNITY_INVITE
+  SYSTEM_ALERT
+}
+
 model Community {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
+  slug        String    @unique
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  imageUrl    String?
+  isActive    Boolean   @default(true)
+  metadata    String    @default("{}") // JSON for extensibility
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? // soft delete
 
   members              Member[]
   giftContributions    GiftContribution[]
   giftBalanceSnapshots GiftBalanceSnapshot[]
+  tags                 Tag[]
+  activityLogs         ActivityLog[]
+  settings             CommunitySettings?
+  giftTemplates        GiftTemplate[]
+  notifications        Notification[]
 
   @@map("communities")
 }
 
+model CommunitySettings {
+  id                      String   @id @default(cuid())
+  communityId             String   @unique
+  requireGiftAcknowledgment Boolean @default(false)
+  defaultVisibility       GiftVisibility @default(COMMUNITY)
+  enableNotifications     Boolean  @default(true)
+  enableMetrics           Boolean  @default(true)
+  customFields            String   @default("{}") // JSON for custom settings
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@map("community_settings")
+}
+
 model Member {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   communityId String
   name        String
   email       String?
   avatarUrl   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  bio         String?
+  skills      String    @default("[]") // JSON array of skills
+  isActive    Boolean   @default(true)
+  joinedAt    DateTime  @default(now())
+  metadata    String    @default("{}") // JSON for extensibility
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? // soft delete
 
-  community            Community             @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  givenContributions   GiftContribution[]    @relation("GiverRelation")
-  receivedContributions GiftContribution[]   @relation("ReceiverRelation")
-  balanceSnapshots     GiftBalanceSnapshot[]
+  community             Community             @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  givenContributions    GiftContribution[]    @relation("GiverRelation")
+  receivedContributions GiftContribution[]    @relation("ReceiverRelation")
+  balanceSnapshots      GiftBalanceSnapshot[]
+  tags                  MemberTag[]
+  relationshipsFrom     MemberRelationship[]  @relation("RelationshipFrom")
+  relationshipsTo       MemberRelationship[]  @relation("RelationshipTo")
+  activityLogs          ActivityLog[]
+  notifications         Notification[]
 
   @@unique([communityId, email])
+  @@index([communityId, isActive])
   @@map("members")
 }
 
 model GiftContribution {
-  id                   String   @id @default(cuid())
-  communityId          String
-  giverMemberId        String
-  receiverMemberId     String?  // nullable for community-wide gifts
-  descriptionMarkdown  String
-  timestamp            DateTime @default(now())
-  valueEstimate        Float?   // soft indicator, not strict accounting
-  tagsJson             String   @default("[]") // JSON array of tags
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                  String         @id @default(cuid())
+  communityId         String
+  giverMemberId       String
+  receiverMemberId    String?        // nullable for community-wide gifts
+  descriptionMarkdown String
+  timestamp           DateTime       @default(now())
+  valueEstimate       Float?         // soft indicator, not strict accounting
+  status              GiftStatus     @default(COMPLETED)
+  visibility          GiftVisibility @default(COMMUNITY)
+  acknowledgedAt      DateTime?
+  templateId          String?        // optional link to template
+  metadata            String         @default("{}") // JSON for extensibility
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  deletedAt           DateTime?      // soft delete
 
-  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  giver     Member    @relation("GiverRelation", fields: [giverMemberId], references: [id], onDelete: Cascade)
-  receiver  Member?   @relation("ReceiverRelation", fields: [receiverMemberId], references: [id], onDelete: Cascade)
+  community     Community      @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  giver         Member         @relation("GiverRelation", fields: [giverMemberId], references: [id], onDelete: Cascade)
+  receiver      Member?        @relation("ReceiverRelation", fields: [receiverMemberId], references: [id], onDelete: Cascade)
+  template      GiftTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  tags          GiftTag[]
+  activityLogs  ActivityLog[]
 
   @@index([communityId, timestamp])
   @@index([giverMemberId])
   @@index([receiverMemberId])
+  @@index([status])
   @@map("gift_contributions")
 }
 
@@ -80,4 +165,127 @@ model GiftBalanceSnapshot {
   @@index([memberId, timestamp])
   @@index([communityId, timestamp])
   @@map("gift_balance_snapshots")
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  communityId String
+  name        String
+  slug        String
+  description String?
+  color       String?  // hex color code
+  icon        String?  // icon identifier
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  community  Community   @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  giftTags   GiftTag[]
+  memberTags MemberTag[]
+
+  @@unique([communityId, slug])
+  @@index([communityId])
+  @@map("tags")
+}
+
+model GiftTag {
+  giftId String
+  tagId  String
+
+  gift GiftContribution @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  tag  Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([giftId, tagId])
+  @@map("gift_tags")
+}
+
+model MemberTag {
+  memberId String
+  tagId    String
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, tagId])
+  @@map("member_tags")
+}
+
+model MemberRelationship {
+  id          String           @id @default(cuid())
+  fromMemberId String
+  toMemberId   String
+  type        RelationshipType
+  strength    Int              @default(1) // 1-5 scale
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  fromMember Member @relation("RelationshipFrom", fields: [fromMemberId], references: [id], onDelete: Cascade)
+  toMember   Member @relation("RelationshipTo", fields: [toMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([fromMemberId, toMemberId, type])
+  @@index([fromMemberId])
+  @@index([toMemberId])
+  @@map("member_relationships")
+}
+
+model GiftTemplate {
+  id                  String   @id @default(cuid())
+  communityId         String
+  name                String
+  descriptionTemplate String   // Template with placeholders like {{amount}}, {{date}}
+  defaultValue        Float?
+  suggestedTags       String   @default("[]") // JSON array of tag slugs
+  isActive            Boolean  @default(true)
+  metadata            String   @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  community Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  gifts     GiftContribution[]
+
+  @@index([communityId, isActive])
+  @@map("gift_templates")
+}
+
+model ActivityLog {
+  id          String       @id @default(cuid())
+  communityId String
+  memberId    String?      // nullable for system events
+  giftId      String?      // link to gift if applicable
+  type        ActivityType
+  action      String
+  details     String       @default("{}") // JSON with event details
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime     @default(now())
+
+  community Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  member    Member?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  gift      GiftContribution? @relation(fields: [giftId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, timestamp])
+  @@index([memberId])
+  @@index([type])
+  @@map("activity_logs")
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  communityId String
+  memberId    String
+  type        NotificationType
+  title       String
+  message     String
+  linkUrl     String?
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  metadata    String           @default("{}")
+  createdAt   DateTime         @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, isRead])
+  @@index([communityId, createdAt])
+  @@map("notifications")
 }
